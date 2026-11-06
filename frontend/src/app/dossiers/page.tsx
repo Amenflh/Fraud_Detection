@@ -12,6 +12,8 @@ import DossierCard from "../components/dossier/DossierCard";
 import { AlertBadge, EmptyState, NetworkBadge, SlaChip, StatusBadge, VerdictPill } from "../components/dossier/ui";
 import { DOSSIERS_UPDATED_EVENT, listDossiers, type DossierSummary } from "../lib/dossiers";
 import { timeAgo, useNow, usePolling } from "../lib/hooks";
+import { useMe } from "../components/AuthProvider";
+import { isStaff } from "../lib/auth";
 import { formatAmount, REJECTED, slaState, STAGES } from "../lib/workflow";
 
 const COLUMNS = [...STAGES.filter((s) => s.key !== "declare"), REJECTED];
@@ -22,6 +24,9 @@ export default function DossiersPage() {
     refreshOn: DOSSIERS_UPDATED_EVENT,
   });
   const now = useNow();
+  const { me } = useMe();
+  const staff = !me || isStaff(me.role);
+  const canDeclare = !me || me.role === "gestionnaire" || me.role === "agent" || me.role === "assure";
   const [query, setQuery] = useState("");
   const [onlyAlerts, setOnlyAlerts] = useState(false);
   const [city, setCity] = useState<string | null>(null);
@@ -46,7 +51,7 @@ export default function DossiersPage() {
   const tiles = [
     { label: "Dossiers ouverts", value: open.length, icon: FolderKanban, tone: "text-cyan-300" },
     { label: "Hors délai (SLA)", value: overdue, icon: Timer, tone: "text-amber-300" },
-    { label: "Alertes IA", value: alerts, icon: Siren, tone: "text-red-300" },
+    ...(staff ? [{ label: "Alertes IA", value: alerts, icon: Siren, tone: "text-red-300" }] : [{ label: "Dossiers clôturés", value: dossiers.length - open.length, icon: Siren, tone: "text-emerald-300" }]),
     { label: "Engagement en cours", value: exposure, icon: Columns3, tone: "text-indigo-300", format: formatAmount },
   ];
 
@@ -67,12 +72,12 @@ export default function DossiersPage() {
           >
             <RefreshCw className={cn("size-3.5", isLoading && "animate-spin")} /> Rafraîchir
           </button>
-          <Link
+          {canDeclare && <Link
             href="/declarer"
             className="flex items-center gap-2 rounded-full bg-gradient-to-r from-cyan-400 to-indigo-500 px-4 py-2 text-xs font-semibold text-slate-950 transition hover:opacity-90"
           >
             <Plus className="size-3.5" /> Nouvelle déclaration
-          </Link>
+          </Link>}
         </div>
       </div>
 
@@ -95,7 +100,7 @@ export default function DossiersPage() {
             <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
             <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="N° sinistre, assuré, immatriculation…" className="pl-8" />
           </div>
-          <button
+          {staff && <button
             onClick={() => setOnlyAlerts((v) => !v)}
             className={cn(
               "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition",
@@ -103,7 +108,7 @@ export default function DossiersPage() {
             )}
           >
             <Siren className="size-3.5" /> Alertes uniquement
-          </button>
+          </button>}
           {cities.map((c) => (
             <button
               key={c}

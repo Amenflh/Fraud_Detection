@@ -46,6 +46,7 @@ from app.db.models import (  # noqa: E402
     Dossier,
     DossierEvent,
     Message,
+    Notification,
     RuleConfig,
     SubscriptionPhoto,
 )
@@ -54,6 +55,9 @@ from app.dossiers.schemas import DossierCreate, InsuredInfo, VehicleInfo  # noqa
 from app.fraud_rules import consortium  # noqa: E402
 
 RNG = random.Random(7)
+# Demo accounts (create them with scripts/manage_users.py). The insured demo account owns a few
+# files; the expert/garage demo accounts are linked to EXP-01 / GAR-01.
+DEMO_ASSURE_EMAIL = "assure.demo@sentinelle.example"
 OWN_INSURER = "Votre compagnie"
 OTHER_INSURERS = ["Assurances Atlas", "Compagnie Alpha", "Mutuelle Horizon"]
 
@@ -180,7 +184,7 @@ def person(i: int) -> tuple[InsuredInfo, VehicleInfo]:
 
 
 def reset(db) -> None:
-    for model in (ConstatFile, Constat, Document, Message, DossierEvent, Dossier, Actor, Contract, SubscriptionPhoto, ConsortiumEntry, RuleConfig):
+    for model in (Notification, ConstatFile, Constat, Document, Message, DossierEvent, Dossier, Actor, Contract, SubscriptionPhoto, ConsortiumEntry, RuleConfig):
         db.execute(delete(model))
     db.execute(delete(ClaimRecord).where(ClaimRecord.claim_id.like("SIN-%")))
     db.commit()
@@ -189,9 +193,9 @@ def reset(db) -> None:
 
 def seed_actors(db) -> None:
     for id_, name, city, specs, rating in EXPERTS:
-        db.add(Actor(id=id_, role="expert", name=name, city=city, specialties=specs, rating=rating, phone=f"+216 71 {RNG.randint(100, 999)} {RNG.randint(100, 999)}"))
+        db.add(Actor(id=id_, role="expert", name=name, city=city, specialties=specs, rating=rating, phone=f"+216 71 {RNG.randint(100, 999)} {RNG.randint(100, 999)}", email=f"{id_.lower()}@sentinelle.example"))
     for id_, name, city in GARAGES:
-        db.add(Actor(id=id_, role="garage", name=name, city=city, specialties=["carrosserie", "mécanique"], rating=round(RNG.uniform(3.6, 4.8), 1), phone=f"+216 71 {RNG.randint(100, 999)} {RNG.randint(100, 999)}"))
+        db.add(Actor(id=id_, role="garage", name=name, city=city, specialties=["carrosserie", "mécanique"], rating=round(RNG.uniform(3.6, 4.8), 1), phone=f"+216 71 {RNG.randint(100, 999)} {RNG.randint(100, 999)}", email=f"{id_.lower()}@sentinelle.example"))
     for id_, name, city in AGENCIES:
         db.add(Actor(id=id_, role="agent", name=name, city=city, specialties=[], rating=4.5))
     db.commit()
@@ -276,6 +280,8 @@ def seed_workflow_dossiers(db, now: datetime) -> None:
 
     for i, (target, overdue) in enumerate(plan):
         insured, vehicle = person(i)
+        if i in (0, 4):
+            insured.email = DEMO_ASSURE_EMAIL  # files the insured demo account can open
         city = RNG.choice(list(CITY_GARAGE))
         incident = RNG.choice(INCIDENTS)
         # Files further along the workflow are older.
@@ -390,7 +396,7 @@ def seed_constats(db, now: datetime) -> None:
 
     def contract_for(p: Party, city: str, years: int):
         start = (now - timedelta(days=365 * years)).date()
-        add_contract(db, p.policy_id, InsuredInfo(name=p.name, phone=p.phone, cin=p.cin), VehicleInfo(plate=p.plate, make_model=p.make_model, year=2018), city, start, start + timedelta(days=365 * (years + 1)))
+        add_contract(db, p.policy_id, InsuredInfo(name=p.name, phone=p.phone, cin=p.cin, email=DEMO_ASSURE_EMAIL if p.policy_id == "POL-584120" else None), VehicleInfo(plate=p.plate, make_model=p.make_model, year=2018), city, start, start + timedelta(days=365 * (years + 1)))
 
     scenarios = [
         {
@@ -434,6 +440,7 @@ def seed_constats(db, now: datetime) -> None:
                 witnesses=s["witnesses"],
             ),
             at=created,
+            owner_email=DEMO_ASSURE_EMAIL if k == 0 else None,
         )
         for face, label in PHOTO_KINDS[:2]:
             constat_service.add_file(db, c, "a", "photo", f"{face}.jpg", "image/jpeg", car_photo(label, (60, 90, 160), created, 5000 + k * 10, damage=True))
@@ -459,6 +466,7 @@ def seed_constats(db, now: datetime) -> None:
             transcript_a="Je tournais à droite quand une voiture qui doublait par la droite m'a heurté sur ma portière droite.",
         ),
         at=now - timedelta(hours=1),
+        owner_email=DEMO_ASSURE_EMAIL,
     )
 
 
@@ -468,6 +476,8 @@ def main() -> None:
     args = parser.parse_args()
     if not args.use_llm:
         get_settings().openai_api_key = None
+    # Seeded people/addresses are fictitious: never queue real SMS/e-mails while loading them.
+    get_settings().notifications_enabled = False
 
     db = get_sessionmaker()()
     reset(db)
@@ -481,7 +491,8 @@ def main() -> None:
         ("Karim Haddad", "+216 98 765 432", "14725836", "231 TU 8890", "Volkswagen Golf 6", "POL-990211", 120),
     ]:
         start = (now - timedelta(days=days)).date()
-        add_contract(db, policy, InsuredInfo(name=name, phone=phone, cin=cin), VehicleInfo(plate=plate, make_model=model, year=2019), "Tunis", start, start + timedelta(days=365 * (days // 365 + 1)))
+        email = DEMO_ASSURE_EMAIL if name == "Sana Mejri" else None
+        add_contract(db, policy, InsuredInfo(name=name, phone=phone, cin=cin, email=email), VehicleInfo(plate=plate, make_model=model, year=2019), "Tunis", start, start + timedelta(days=365 * (days // 365 + 1)))
     db.commit()
 
     seed_workflow_dossiers(db, now)

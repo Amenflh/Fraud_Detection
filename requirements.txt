@@ -19,6 +19,7 @@ alembic==1.13.3
 pyjwt==2.9.0
 cryptography==43.0.1
 Pillow==10.4.0
+reportlab==4.2.5
 python-multipart==0.0.12
 pytest==8.3.3
 pytest-mock==3.14.0

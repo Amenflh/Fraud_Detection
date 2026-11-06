@@ -58,7 +58,7 @@ def lookup_contract(db: Session, policy_id: str, plate: str) -> dict:
     }
 
 
-def create(db: Session, data: ConstatCreate, at: datetime | None = None) -> Constat:
+def create(db: Session, data: ConstatCreate, at: datetime | None = None, owner_email: str | None = None) -> Constat:
     at = at or dossier_service.utcnow()
     extraction = circumstance_agent.extract(data.transcript_a or "")
     party_a = data.party_a.model_dump()
@@ -80,6 +80,7 @@ def create(db: Session, data: ConstatCreate, at: datetime | None = None) -> Cons
         witnesses=[w.model_dump() for w in data.witnesses],
         transcript_a=data.transcript_a,
         analysis={"extraction": extraction},
+        owner_email=owner_email.lower() if owner_email else None,
     )
     db.add(c)
     db.commit()
@@ -122,13 +123,9 @@ def _store_signature(db: Session, c: Constat, party: str, sig: Signature) -> dic
     }
 
 
-def _finalize_if_complete(c: Constat) -> None:
-    if not (c.signature_a and c.signature_b and c.party_b):
-        c.status = "attente_signature_a" if c.party_b else "attente_conducteur_b"
-        return
-    responsibility = responsibility_agent.decide(c.party_a.get("cases", []), c.party_b.get("cases", []))
-    coherence = responsibility_agent.coherence(c, c.created_at)
-    c.analysis = {**c.analysis, "responsibility": responsibility, "coherence": coherence}
+def compute_seal(c: Constat) -> str:
+    """SHA-256 over the report's content and both signatures. Any later change to the stored
+    data no longer matches the seal printed on the PDF, which is what `verify` detects."""
     payload = {
         "id": c.id,
         "accident_at": c.accident_at.isoformat(),
@@ -138,8 +135,41 @@ def _finalize_if_complete(c: Constat) -> None:
         "witnesses": c.witnesses,
         "signatures": [c.signature_a["sha256"], c.signature_b["sha256"]],
     }
-    # Tamper-evidence: any later change to the content would no longer match this seal.
-    c.seal = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def verify(db: Session, c: Constat, presented_seal: str | None = None) -> dict:
+    """Public authenticity check: recomputes the seal and the signature-image hashes."""
+    if not (c.seal and c.signature_a and c.signature_b):
+        return {"id": c.id, "sealed": False, "valid": False, "reason": "Constat non signé par les deux conducteurs"}
+    content_ok = compute_seal(c) == c.seal
+    files_ok = True
+    for sig in (c.signature_a, c.signature_b):
+        f = db.get(ConstatFile, sig["file_id"])
+        path = Path(f.path) if f else None
+        files_ok &= bool(path and path.exists() and hashlib.sha256(path.read_bytes()).hexdigest() == sig["sha256"])
+    matches = presented_seal is None or presented_seal.lower() == c.seal
+    return {
+        "id": c.id,
+        "sealed": True,
+        "valid": content_ok and files_ok and matches,
+        "content_unaltered": content_ok,
+        "signatures_unaltered": files_ok,
+        "seal_matches_document": matches,
+        "accident_at": c.accident_at.isoformat(),
+        "signed_at_a": c.signature_a["signed_at"],
+        "signed_at_b": c.signature_b["signed_at"],
+    }
+
+
+def _finalize_if_complete(c: Constat) -> None:
+    if not (c.signature_a and c.signature_b and c.party_b):
+        c.status = "attente_signature_a" if c.party_b else "attente_conducteur_b"
+        return
+    responsibility = responsibility_agent.decide(c.party_a.get("cases", []), c.party_b.get("cases", []))
+    coherence = responsibility_agent.coherence(c, c.created_at)
+    c.analysis = {**c.analysis, "responsibility": responsibility, "coherence": coherence}
+    c.seal = compute_seal(c)
     c.status = "signe"
 
 
@@ -183,7 +213,8 @@ def convert(db: Session, c: Constat, req: ConvertRequest, at: datetime | None = 
         prior_claims_count=prior or 0,
         vehicle_age=(accident_day.year - contract.year) if contract and contract.year else None,
         claim_description=c.transcript_a or a.get("observations"),
-        insured=InsuredInfo(name=a["name"], phone=a["phone"], email=a.get("email"), cin=a.get("cin")),
+        # An insured who declared from their own account owns the file by that account's e-mail.
+        insured=InsuredInfo(name=a["name"], phone=a["phone"], email=c.owner_email or a.get("email"), cin=a.get("cin")),
         vehicle=VehicleInfo(plate=a["plate"], make_model=a["make_model"], year=contract.year if contract else None),
         city=c.city,
         address=c.address,

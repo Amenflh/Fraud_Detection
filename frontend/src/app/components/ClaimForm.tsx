@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { ClaimFormValues, claimFormSchema } from "../lib/validation";
+import { ClaimFormInput, ClaimFormValues, claimFormSchema } from "../lib/validation";
 import LiveSignals from "./LiveSignals";
 
 const INCIDENT_TYPES: { value: string; label: string }[] = [
@@ -93,7 +93,7 @@ export default function ClaimForm({
     control,
     reset,
     formState: { errors },
-  } = useForm<ClaimFormValues>({
+  } = useForm<ClaimFormInput, unknown, ClaimFormValues>({
     resolver: zodResolver(claimFormSchema),
     defaultValues: DEFAULT_VALUES,
   });
@@ -196,7 +196,7 @@ export default function ClaimForm({
           </div>
 
           <div className="col-span-2">
-            <LiveSignals claim_amount={amount} days_since_policy_start={days} prior_claims_count={prior} />
+            <LiveSignals claim_amount={Number(amount)} days_since_policy_start={Number(days)} prior_claims_count={Number(prior)} />
           </div>
 
           <div className="col-span-2">

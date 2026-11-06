@@ -8,6 +8,7 @@ import {
   Car,
   FileText,
   History,
+  Bell,
   Info,
   Loader2,
   MessagesSquare,
@@ -35,10 +36,13 @@ import { AlertBadge, EmptyState, FraudIndexChip, NetworkBadge, SlaChip, StatusBa
 import WorkflowStepper from "../../components/dossier/WorkflowStepper";
 import RiskGauge from "../../components/RiskGauge";
 import { advanceDossier, DOSSIERS_UPDATED_EVENT, getDossier, type Role, type StatusKey } from "../../lib/dossiers";
+import { isStaff, seesFraud } from "../../lib/auth";
+import { useMe } from "../../components/AuthProvider";
+import NotificationsTab from "../../components/dossier/NotificationsTab";
 import { usePolling } from "../../lib/hooks";
 import { formatAmount, ROLE_META, STAGE_META } from "../../lib/workflow";
 
-type TabKey = "fraude" | "general" | "photos" | "documents" | "expert" | "garage" | "chat" | "historique";
+type TabKey = "fraude" | "general" | "photos" | "documents" | "expert" | "garage" | "chat" | "notifications" | "historique";
 
 const ROLES: Role[] = ["gestionnaire", "assure", "agent", "expert", "garage"];
 
@@ -47,7 +51,13 @@ export default function DossierPage() {
   const fetcher = useCallback(() => getDossier(id), [id]);
   const { data: dossier, error, refresh } = usePolling(fetcher, { intervalMs: 10000, refreshOn: DOSSIERS_UPDATED_EVENT });
   const [tab, setTab] = useState<TabKey>("fraude");
-  const [role, setRole] = useState<Role>("gestionnaire");
+  const { me } = useMe();
+  // Only a manager may act "as" another role (demo role switcher); everyone else is pinned to their own.
+  const [simulated, setSimulated] = useState<Role>("gestionnaire");
+  const isManager = !me || me.role === "gestionnaire";
+  const role: Role = isManager ? simulated : (me!.role as Role);
+  const staff = !me || isStaff(me.role);
+  const fraudVisible = !me || seesFraud(me.role);
   const [busy, setBusy] = useState<StatusKey | null>(null);
 
   const onChange = useCallback(() => {
@@ -88,16 +98,19 @@ export default function DossierPage() {
 
   const photos = dossier.documents.filter((d) => d.content_type.startsWith("image/"));
   const alerts = dossier.events.filter((e) => e.kind === "alert").length;
-  const tabs: { key: TabKey; label: string; icon: LucideIcon; badge?: number; danger?: boolean }[] = [
-    { key: "fraude", label: "Fraude & IA", icon: ShieldAlert, badge: alerts + (dossier.ai.rules?.hits.length ?? 0), danger: alerts > 0 || dossier.rules_level === "high" },
+  const allTabs: { key: TabKey; label: string; icon: LucideIcon; badge?: number; danger?: boolean; show?: boolean }[] = [
+    { key: "fraude", label: "Fraude & IA", icon: ShieldAlert, badge: alerts + (dossier.ai.rules?.hits.length ?? 0), danger: alerts > 0 || dossier.rules_level === "high", show: fraudVisible },
     { key: "general", label: "Général", icon: Info },
     { key: "photos", label: "Photos", icon: Camera, badge: photos.length },
     { key: "documents", label: "Documents", icon: FileText, badge: dossier.documents.length - photos.length },
-    { key: "expert", label: "Expert", icon: Search },
+    { key: "expert", label: "Expert", icon: Search, show: staff },
     { key: "garage", label: "Garage", icon: Wrench },
     { key: "chat", label: "Chat", icon: MessagesSquare, badge: dossier.messages.length },
+    { key: "notifications", label: "Notifications", icon: Bell, show: staff },
     { key: "historique", label: "Historique", icon: History },
   ];
+  const tabs = allTabs.filter((t) => t.show !== false);
+  const activeTab: TabKey = tabs.some((t) => t.key === tab) ? tab : tabs[0].key;
   const nextStep = dossier.allowed_next.find((s) => s !== "rejete");
   const canReject = dossier.allowed_next.includes("rejete");
 
@@ -133,12 +146,19 @@ export default function DossierPage() {
           </div>
 
           <div className="flex flex-col gap-3 lg:items-end">
+            {!isManager && me && (
+              <span className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs">
+                <UserCog className="size-3.5 text-muted-foreground" /> Connecté en tant que{" "}
+                <b style={{ color: ROLE_META[me.role as Role].color }}>{ROLE_META[me.role as Role].label}</b>
+              </span>
+            )}
+            {isManager && (
             <div className="flex flex-wrap items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1" title="Simulez la vue de chaque acteur">
               <UserCog className="ml-2 mr-1 size-3.5 text-muted-foreground" />
               {ROLES.map((r) => (
                 <button
                   key={r}
-                  onClick={() => setRole(r)}
+                  onClick={() => setSimulated(r)}
                   className={cn("rounded-full px-2.5 py-1 text-xs transition", role === r ? "text-slate-950" : "text-muted-foreground hover:text-foreground")}
                   style={role === r ? { background: ROLE_META[r].color } : undefined}
                 >
@@ -146,6 +166,7 @@ export default function DossierPage() {
                 </button>
               ))}
             </div>
+            )}
             <div className="flex flex-wrap gap-2">
               {canReject && (
                 <button
@@ -183,7 +204,7 @@ export default function DossierPage() {
                   onClick={() => setTab(key)}
                   className={cn(
                     "relative flex shrink-0 items-center gap-1.5 px-3 py-2.5 text-sm transition",
-                    tab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                    activeTab === key ? "text-foreground" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   <Icon className="size-4" />
@@ -191,30 +212,31 @@ export default function DossierPage() {
                   {!!badge && (
                     <span className={cn("rounded-full px-1.5 text-[10px] tabular-nums", danger ? "bg-red-500/80 text-white" : "bg-white/10")}>{badge}</span>
                   )}
-                  {tab === key && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-gradient-to-r from-cyan-300 to-indigo-400" />}
+                  {activeTab === key && <span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-gradient-to-r from-cyan-300 to-indigo-400" />}
                 </button>
               ))}
             </div>
 
-            <div key={tab} className="animate-fade-up">
-              {tab === "fraude" && <FraudTab dossier={dossier} />}
-              {tab === "general" && <GeneralTab dossier={dossier} />}
-              {tab === "photos" && <PhotosTab dossier={dossier} role={role} onChange={onChange} />}
-              {tab === "documents" && <DocumentsTab dossier={dossier} role={role} onChange={onChange} />}
-              {tab === "expert" && <ExpertTab dossier={dossier} role={role} onChange={onChange} />}
-              {tab === "garage" && <GarageTab dossier={dossier} />}
-              {tab === "chat" && <ChatTab dossierId={dossier.id} role={role} />}
-              {tab === "historique" && <TimelineTab dossier={dossier} />}
+            <div key={activeTab} className="animate-fade-up">
+              {activeTab === "fraude" && <FraudTab dossier={dossier} />}
+              {activeTab === "general" && <GeneralTab dossier={dossier} />}
+              {activeTab === "photos" && <PhotosTab dossier={dossier} role={role} onChange={onChange} />}
+              {activeTab === "documents" && <DocumentsTab dossier={dossier} role={role} onChange={onChange} />}
+              {activeTab === "expert" && <ExpertTab dossier={dossier} role={role} onChange={onChange} />}
+              {activeTab === "garage" && <GarageTab dossier={dossier} />}
+              {activeTab === "chat" && <ChatTab dossierId={dossier.id} role={role} />}
+              {activeTab === "notifications" && <NotificationsTab dossierId={dossier.id} canRetry={isManager} />}
+              {activeTab === "historique" && <TimelineTab dossier={dossier} />}
             </div>
           </CardContent>
         </Card>
 
         <aside className="space-y-5 lg:sticky lg:top-24 lg:self-start">
-          <CopilotPanel dossierId={dossier.id} copilot={dossier.ai.copilot} onChange={onChange} />
-          {dossier.risk_score != null && (
+          {staff && <CopilotPanel dossierId={dossier.id} copilot={dossier.ai.copilot} canSend={isManager} onChange={onChange} />}
+          {(dossier.risk_score != null || !fraudVisible) && (
             <Card>
               <CardContent className="space-y-3">
-                <RiskGauge score={dossier.risk_score} />
+                {dossier.risk_score != null && <RiskGauge score={dossier.risk_score} />}
                 <div className="grid grid-cols-2 gap-2 text-center text-xs">
                   <div className="rounded-lg bg-white/5 p-2">
                     <p className="text-muted-foreground">Déclaré</p>

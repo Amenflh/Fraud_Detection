@@ -1,13 +1,13 @@
 "use client";
 
-import { Bot, Copy, MessageSquareText, Send, Sparkles } from "lucide-react";
+import { Bot, Copy, Mail, MessageSquare, MessageSquareText, Send, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { postMessage, type Copilot } from "../../lib/dossiers";
+import { notifyInsured, type Copilot } from "../../lib/dossiers";
 
 const PRIORITY: Record<string, string> = {
   haute: "bg-red-500/15 text-red-300 ring-red-400/30",
@@ -16,19 +16,33 @@ const PRIORITY: Record<string, string> = {
   basse: "bg-white/5 text-muted-foreground ring-white/10",
 };
 
-export default function CopilotPanel({ dossierId, copilot, onChange }: { dossierId: string; copilot?: Copilot; onChange: () => void }) {
+type Channel = "sms" | "email";
+
+export default function CopilotPanel({
+  dossierId,
+  copilot,
+  canSend,
+  onChange,
+}: {
+  dossierId: string;
+  copilot?: Copilot;
+  canSend: boolean;
+  onChange: () => void;
+}) {
   const [draft, setDraft] = useState<{ base: string; text: string } | null>(null);
+  const [channels, setChannels] = useState<Channel[]>(["sms"]);
   const [sending, setSending] = useState(false);
 
   if (!copilot) return null;
   // Reset the editable draft whenever the copilot proposes a new SMS.
   const sms = draft && draft.base === copilot.sms ? draft.text : copilot.sms;
+  const toggle = (c: Channel) => setChannels((cur) => (cur.includes(c) ? cur.filter((x) => x !== c) : [...cur, c]));
 
   async function send() {
     setSending(true);
     try {
-      await postMessage(dossierId, "gestionnaire", `📱 SMS envoyé à l'assuré : « ${sms} »`);
-      toast.success("Notification envoyée à l'assuré (simulation SMS + journal du chat)");
+      const queued = await notifyInsured(dossierId, sms, channels);
+      toast.success(`${queued.length} notification(s) transmise(s) — suivi dans l'onglet Notifications`);
       onChange();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erreur");
@@ -47,9 +61,7 @@ export default function CopilotPanel({ dossierId, copilot, onChange }: { dossier
           </span>
           Copilote IA
         </CardTitle>
-        <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-muted-foreground">
-          {copilot.source === "llm" ? "LLM" : "règles métier"}
-        </span>
+        <span className="rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-muted-foreground">{copilot.source === "llm" ? "LLM" : "règles métier"}</span>
       </CardHeader>
       <CardContent className="relative space-y-4">
         <p className="text-sm leading-relaxed text-muted-foreground">{copilot.summary}</p>
@@ -59,21 +71,33 @@ export default function CopilotPanel({ dossierId, copilot, onChange }: { dossier
             <span className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-fuchsia-200/90">
               <Sparkles className="size-3.5" /> Prochaine action
             </span>
-            <span className={cn("rounded-full px-2 py-0.5 text-[10px] ring-1", PRIORITY[copilot.priority] ?? PRIORITY.normale)}>
-              priorité {copilot.priority}
-            </span>
+            <span className={cn("rounded-full px-2 py-0.5 text-[10px] ring-1", PRIORITY[copilot.priority] ?? PRIORITY.normale)}>priorité {copilot.priority}</span>
           </div>
           <p className="text-sm font-medium">{copilot.next_action}</p>
         </div>
 
         <div>
           <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            <MessageSquareText className="size-3.5" /> Notification assuré
+            <MessageSquareText className="size-3.5" /> Message à l&apos;assuré
           </p>
           <Textarea value={sms} onChange={(e) => setDraft({ base: copilot.sms, text: e.target.value })} rows={3} className="text-sm" />
-          <div className="mt-2 flex items-center justify-between">
-            <span className={cn("text-[11px] tabular-nums", sms.length > 160 ? "text-red-300" : "text-muted-foreground")}>{sms.length}/160</span>
-            <div className="flex gap-2">
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <span className={cn("text-[11px] tabular-nums", sms.length > 160 ? "text-amber-300" : "text-muted-foreground")}>
+              {sms.length}/160{sms.length > 160 && " · 2 SMS facturés"}
+            </span>
+            <div className="flex items-center gap-2">
+              {(["sms", "email"] as Channel[]).map((c) => (
+                <button
+                  key={c}
+                  onClick={() => toggle(c)}
+                  className={cn(
+                    "flex items-center gap-1 rounded-lg border px-2 py-1.5 text-[11px] transition",
+                    channels.includes(c) ? "border-fuchsia-300/50 bg-fuchsia-500/15 text-fuchsia-100" : "border-white/10 text-muted-foreground"
+                  )}
+                >
+                  {c === "sms" ? <MessageSquare className="size-3" /> : <Mail className="size-3" />} {c === "sms" ? "SMS" : "E-mail"}
+                </button>
+              ))}
               <button
                 onClick={() => navigator.clipboard.writeText(sms).then(() => toast.success("Copié"))}
                 className="rounded-lg border border-white/10 bg-white/5 p-2 text-muted-foreground transition hover:text-foreground"
@@ -81,13 +105,15 @@ export default function CopilotPanel({ dossierId, copilot, onChange }: { dossier
               >
                 <Copy className="size-3.5" />
               </button>
-              <button
-                onClick={send}
-                disabled={sending || !sms.trim()}
-                className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-indigo-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
-              >
-                <Send className="size-3.5" /> Envoyer
-              </button>
+              {canSend && (
+                <button
+                  onClick={send}
+                  disabled={sending || !sms.trim() || channels.length === 0}
+                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-fuchsia-500 to-indigo-500 px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50"
+                >
+                  <Send className="size-3.5" /> Envoyer
+                </button>
+              )}
             </div>
           </div>
         </div>

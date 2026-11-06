@@ -34,6 +34,7 @@ class Actor(Base):
     city: Mapped[str] = mapped_column(String)
     specialties: Mapped[list] = mapped_column(JSON, default=list)
     phone: Mapped[str | None] = mapped_column(String, nullable=True)
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
     rating: Mapped[float] = mapped_column(Float, default=4.0)
 
 
@@ -152,6 +153,7 @@ class Constat(Base):
     signature_b: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     analysis: Mapped[dict] = mapped_column(JSON, default=dict)
     seal: Mapped[str | None] = mapped_column(String, nullable=True)
+    owner_email: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     dossier_id: Mapped[str | None] = mapped_column(ForeignKey("dossiers.id"), nullable=True)
 
 
@@ -189,3 +191,27 @@ class ConsortiumEntry(Base):
     company: Mapped[str] = mapped_column(String)
     reason: Mapped[str] = mapped_column(String)
     reported_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class Notification(Base):
+    """Outbox of SMS/e-mails: written in the same transaction as the business change, then
+    delivered by a dispatcher (so a provider outage never loses or blocks a notification)."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    dossier_id: Mapped[str | None] = mapped_column(ForeignKey("dossiers.id"), nullable=True, index=True)
+    channel: Mapped[str] = mapped_column(String)  # sms | email
+    recipient: Mapped[str] = mapped_column(String)
+    recipient_role: Mapped[str] = mapped_column(String)
+    kind: Mapped[str] = mapped_column(String)
+    subject: Mapped[str | None] = mapped_column(String, nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    html: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, index=True, default="pending")
+    provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dedupe_key: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

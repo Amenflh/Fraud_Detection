@@ -107,6 +107,31 @@ Un constat signé se transforme en dossier sinistre en un clic.
 **Base mutualisée** : identifiants pseudonymisés par HMAC-SHA256 partagés entre compagnies.
 **API SaaS** : `POST /api/v1/fraud/check` (en-tête `X-API-Key`, variable `FRAUD_API_KEY`).
 
+## Comptes par rôle, notifications réelles et PDF du constat
+
+**Rôles** (`app/auth.py`, `app/access.py`) : `gestionnaire`, `agent`, `expert`, `garage`, `assure`. Le rôle est lu
+dans `app_metadata.role` du jeton Supabase (modifiable uniquement avec la clé *service role*, jamais par
+l'utilisateur). **Accès refusé par défaut** : un compte sans rôle reçoit 403. Chaque rôle ne voit que ses
+dossiers ; l'assuré et le garage reçoivent une vue **sans aucune information de fraude**.
+
+```bash
+# 1. Garder le compte admin existant : dans .env, STAFF_EMAILS=votre.email@exemple.com
+# 2. Créer les comptes de démo (clé service_role dans .env : SUPABASE_SERVICE_ROLE_KEY)
+python scripts/manage_users.py create-demo
+python scripts/manage_users.py set-role quelquun@exemple.com expert --actor-id EXP-01
+alembic upgrade head && python scripts/seed_demo_dossiers.py
+```
+
+**Notifications** (`app/notifications/`) : SMS via Twilio, e-mail via SMTP (variables `TWILIO_*` / `SMTP_*`
+dans `.env.example`). Sans identifiants, les messages sont enregistrés et marqués « simulés ». Boîte d'envoi
+(*outbox*) avec reprises, clé de déduplication, liste blanche `NOTIFY_ALLOWLIST` pour les démos, alerte e-mail
+aux responsables (`ALERT_EMAILS`) quand le score des règles atteint `FRAUD_ALERT_THRESHOLD`.
+
+**PDF du constat** (`app/constat/pdf.py`) : `GET /constats/{id}/pdf` — structure du constat amiable (cases 1 à 15,
+17 circonstances, colonnes A/B), certificat d'intégrité avec scellé SHA-256 et QR code menant à
+`/constat/verifier/{id}` (page publique qui détecte toute altération). Filigrane « PROJET » tant que les deux
+conducteurs n'ont pas signé. Ce n'est pas une signature électronique qualifiée.
+
 ## Utiliser un vrai dataset Kaggle
 
 1. Créez un token API sur https://www.kaggle.com/settings (Account > API > Create New Token).

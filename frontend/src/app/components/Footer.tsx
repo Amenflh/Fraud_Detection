@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, BrainCircuit, Camera, Coins, Cpu, Database, FileSignature, FolderKanban, Gavel, Layers, ListChecks, Lock, Mic, Network, ScanSearch, Scale, Search, Sparkles, Truck, type LucideIcon } from "lucide-react";
+import { Activity, BrainCircuit, Camera, Coins, Cpu, Database, FileSignature, FolderKanban, Gavel, Layers, ListChecks, Lock, Mail, MessageSquare, Mic, Network, ScanSearch, Scale, Search, Sparkles, Truck, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 
 import { cn } from "@/lib/utils";
@@ -25,7 +25,7 @@ const AGENTS: { label: string; icon: LucideIcon }[] = [
 
 const STACK = ["FastAPI", "LangGraph", "XGBoost", "IsolationForest", "Next.js", "Supabase"];
 
-function StatusRow({ label, ok, icon: Icon }: { label: string; ok: boolean | null; icon: LucideIcon }) {
+function StatusRow({ label, ok, icon: Icon, text }: { label: string; ok: boolean | null; icon: LucideIcon; text?: [string, string] }) {
   return (
     <li className="flex items-center justify-between gap-3 text-sm">
       <span className="flex items-center gap-2 text-muted-foreground">
@@ -38,7 +38,7 @@ function StatusRow({ label, ok, icon: Icon }: { label: string; ok: boolean | nul
           ok === null ? "bg-white/5 text-muted-foreground" : ok ? "bg-emerald-500/10 text-emerald-300" : "bg-red-500/10 text-red-300"
         )}
       >
-        {ok === null ? "…" : ok ? "Opérationnel" : "Indisponible"}
+        {ok === null ? "…" : ok ? (text?.[0] ?? "Opérationnel") : (text?.[1] ?? "Indisponible")}
       </span>
     </li>
   );
@@ -135,6 +135,8 @@ export default function Footer() {
             <StatusRow label="Modèle ML" ok={health ? health.model_trained : online === false ? false : null} icon={Cpu} />
             <StatusRow label="Agents LLM" ok={health ? health.openai_configured : online === false ? false : null} icon={BrainCircuit} />
             <StatusRow label="Authentification" ok={health ? health.supabase_auth_configured : online === false ? false : null} icon={Lock} />
+            <StatusRow label="E-mail" ok={health ? Boolean(health.email_configured) : online === false ? false : null} icon={Mail} text={["SMTP actif", "Simulé"]} />
+            <StatusRow label="SMS" ok={health ? Boolean(health.sms_configured) : online === false ? false : null} icon={MessageSquare} text={["Twilio actif", "Simulé"]} />
           </ul>
           <p className="mt-3 text-[11px] text-muted-foreground/70">Dernière vérification {timeAgo(checkedAt, now)}</p>
         </div>

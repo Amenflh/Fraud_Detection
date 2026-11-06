@@ -1,6 +1,7 @@
 """Claim-file use cases: declaration, workflow transitions, expert assignment, chat and
 documents. Every state change re-runs the Copilot so its recommendation stays current."""
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from app.agents.dossier_graph import run_intake
 from app.db.models import Actor, ClaimRecord, Document, Dossier, DossierEvent, Message, SubscriptionPhoto
 from app.dossiers import workflow
 from app.fraud_rules import consortium, engine
+from app.notifications import service as notify
 from app.dossiers.schemas import (
     ActorOut,
     DocumentOut,
@@ -68,6 +70,7 @@ def _set_status(db: Session, d: Dossier, to: str, role: str, label: str | None =
     )
     d.status = to
     d.updated_at = at
+    notify.queue_status_change(db, d, to)
 
 
 def _new_id(db: Session, at: datetime) -> str:
@@ -90,6 +93,7 @@ def refresh_copilot(db: Session, d: Dossier, pool: list[Dossier] | None = None) 
     """Re-runs the rules engine then the Copilot (which reads the rules outcome)."""
     rules = engine.evaluate_dossier(db, d, pool)
     d.ai_json = {**(d.ai_json or {}), "rules": rules}
+    notify.queue_fraud_alert(db, d, rules)
     verdict = d.verdict_json or {}
     dispatch = (d.ai_json or {}).get("dispatch") or []
     ctx = {
@@ -196,6 +200,7 @@ def assign_expert(db: Session, d: Dossier, expert_id: str, role: str, at: dateti
         raise WorkflowError("Dossier clôturé")
     at = at or utcnow()
     d.expert_id = expert.id
+    notify.queue_mission(db, d, expert)
     _event(db, d.id, "assignment", role, f"Expert missionné : {expert.name} ({expert.city})", {"expert_id": expert.id}, at)
     if d.status in ("declare", "analyse_ia"):
         _set_status(db, d, "expert_missionne", role, at=at)
@@ -222,13 +227,13 @@ def advance(db: Session, d: Dossier, to: str, role: str, note: str | None = None
     return d
 
 
-def author_for(db: Session, d: Dossier, role: str, user: dict) -> str:
+def author_for(db: Session, d: Dossier, role: str, user_email: str | None) -> str:
     if role == "assure":
         return d.insured_json["name"]
     if role in ("expert", "garage", "agent"):
         actor = _actor(db, getattr(d, f"{role}_id"))
         return actor.name if actor else role.capitalize()
-    return user.get("email") or "Gestionnaire"
+    return user_email or "Gestionnaire"
 
 
 def add_message(db: Session, d: Dossier, role: str, author: str, text: str, at: datetime | None = None) -> Message:
@@ -371,15 +376,16 @@ def to_summary(
     )
 
 
-def list_summaries(db: Session) -> list[DossierSummary]:
-    dossiers = db.execute(select(Dossier).order_by(Dossier.created_at.desc())).scalars().all()
+def list_summaries(db: Session, visible: Callable[[Dossier], bool] | None = None) -> list[DossierSummary]:
+    pool = db.execute(select(Dossier).order_by(Dossier.created_at.desc())).scalars().all()
+    dossiers = [d for d in pool if visible is None or visible(d)]
     actors = {a.id: a for a in db.execute(select(Actor)).scalars()}
     entered = _stage_entered(db, [d.id for d in dossiers])
     photo_alerts: dict[str, int] = {}
     for dossier_id, analysis in db.execute(select(Document.dossier_id, Document.analysis)).all():
         photo_alerts[dossier_id] = photo_alerts.get(dossier_id, 0) + int(analysis.get("verdict") == "suspect")
     return [
-        to_summary(d, actors, entered.get(d.id), network_agent.analyze(db, d, dossiers)["level"], photo_alerts.get(d.id, 0))
+        to_summary(d, actors, entered.get(d.id), network_agent.analyze(db, d, pool)["level"], photo_alerts.get(d.id, 0))
         for d in dossiers
     ]
 

@@ -8,6 +8,7 @@ import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import AppBackground from "./components/AppBackground";
 import Footer from "./components/Footer";
+import { AuthProvider, RouteGuard } from "./components/AuthProvider";
 import Header from "./components/Header";
 import { HealthProvider } from "./components/HealthProvider";
 
@@ -48,9 +49,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full flex flex-col">
         <AppBackground />
         <HealthProvider>
-          <Header user={user} />
-          {children}
-          <Footer />
+          {/* key: remount on sign-in/out so the role is re-read from the API */}
+          <AuthProvider key={user?.id ?? "anon"}>
+            <Header user={user} />
+            <RouteGuard>{children}</RouteGuard>
+            <Footer />
+          </AuthProvider>
         </HealthProvider>
         <Toaster theme="dark" position="bottom-right" />
       </body>

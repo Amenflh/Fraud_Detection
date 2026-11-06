@@ -13,6 +13,8 @@ export const claimFormSchema = z.object({
 });
 
 export type ClaimFormValues = z.infer<typeof claimFormSchema>;
+// Raw form values before z.coerce turns the numeric fields into numbers.
+export type ClaimFormInput = z.input<typeof claimFormSchema>;
 
 export const loginSchema = z.object({
   email: z.string().email("Adresse email invalide"),

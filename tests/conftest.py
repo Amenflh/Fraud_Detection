@@ -119,6 +119,6 @@ def test_db(tmp_path):
 def bypass_auth():
     from app.main import app
 
-    app.dependency_overrides[get_current_user] = lambda: {"sub": "test-user", "email": "test@example.com"}
+    app.dependency_overrides[get_current_user] = lambda: {"sub": "test-user", "email": "test@example.com", "app_metadata": {"role": "gestionnaire"}}
     yield
     app.dependency_overrides.pop(get_current_user, None)

@@ -312,3 +312,42 @@ export const getWorkflowKpis = () =>
   authedFetch("/kpis/workflow", { cache: "no-store" }).then((r) => json<WorkflowKpis>(r));
 
 export const getNetwork = () => authedFetch("/network", { cache: "no-store" }).then((r) => json<NetworkGraph>(r));
+
+// --- notifications (SMS / e-mail) ---
+
+export interface NotificationRow {
+  id: number;
+  channel: "sms" | "email";
+  recipient: string;
+  recipient_role: string;
+  kind: string;
+  subject: string | null;
+  body: string;
+  status: "pending" | "sent" | "simulated" | "failed" | "skipped";
+  provider: string | null;
+  attempts: number;
+  error: string | null;
+  created_at: string;
+  sent_at: string | null;
+}
+
+export interface NotificationsStatus {
+  enabled: boolean;
+  email: { configured: boolean; provider: string; from: string };
+  sms: { configured: boolean; provider: string };
+  alert_recipients: number;
+  alert_threshold: number;
+  allowlist: boolean;
+}
+
+export const listNotifications = (id: string) =>
+  authedFetch(`/dossiers/${id}/notifications`, { cache: "no-store" }).then((r) => json<NotificationRow[]>(r));
+
+export const notifyInsured = (id: string, message: string, channels: ("sms" | "email")[]) =>
+  authedFetch(`/dossiers/${id}/notify`, jsonInit("POST", { message, channels })).then((r) => json<NotificationRow[]>(r));
+
+export const retryNotification = (id: number) =>
+  authedFetch(`/notifications/${id}/retry`, { method: "POST" }).then((r) => json<NotificationRow>(r));
+
+export const getNotificationsStatus = () =>
+  authedFetch("/notifications/status", { cache: "no-store" }).then((r) => json<NotificationsStatus>(r));

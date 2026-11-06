@@ -7,6 +7,8 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import { canOpen, ROLE_LABELS } from "../lib/auth";
+import { useMe } from "./AuthProvider";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import { cn } from "@/lib/utils";
 import { useNow } from "../lib/hooks";
@@ -38,7 +40,10 @@ export default function Header({ user }: { user: User | null }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
+  const { me } = useMe();
   const showNav = pathname !== "/login" && (user !== null || !isSupabaseConfigured());
+  // Only the sections this role may open (the API enforces it; this keeps the menu honest).
+  const links = LINKS.filter((l) => !me || canOpen(me.role, l.href));
 
   async function handleLogout() {
     await createClient().auth.signOut();
@@ -53,7 +58,7 @@ export default function Header({ user }: { user: User | null }) {
           <Brand />
           {showNav && (
             <nav className="hidden items-center gap-0.5 xl:flex">
-              {LINKS.map(({ href, label, icon: Icon }) => {
+              {links.map(({ href, label, icon: Icon }) => {
                 const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
                 return (
                   <Link
@@ -86,7 +91,10 @@ export default function Header({ user }: { user: User | null }) {
               <span className="grid size-8 place-items-center rounded-full bg-gradient-to-br from-cyan-400 to-indigo-500 text-xs font-bold uppercase text-slate-950">
                 {user.email?.[0] ?? "?"}
               </span>
-              <span className="max-w-40 truncate text-xs text-muted-foreground">{user.email}</span>
+              <span className="max-w-44 truncate text-xs text-muted-foreground">
+                {me && <b className="mr-1.5 rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">{ROLE_LABELS[me.role]}</b>}
+                {me?.actor_name ?? user.email}
+              </span>
               <button
                 onClick={handleLogout}
                 className="rounded-lg p-2 text-muted-foreground transition hover:bg-white/10 hover:text-red-300"
@@ -111,7 +119,7 @@ export default function Header({ user }: { user: User | null }) {
       {showNav && menuOpen && (
         <div className="border-t border-white/10 px-4 py-3 xl:hidden animate-fade-up">
           <StatusPill className="mb-3" />
-          {LINKS.map(({ href, label, icon: Icon }) => (
+          {links.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}

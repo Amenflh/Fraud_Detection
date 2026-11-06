@@ -6,7 +6,7 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { DossierDetail } from "../../lib/dossiers";
 import { formatAmount, formatDateTime, INCIDENT_LABELS } from "../../lib/workflow";
-import { CoherenceList, ResponsibilityBar, Seal } from "../constat/ConstatWidgets";
+import { CoherenceList, PdfButton, ResponsibilityBar, Seal } from "../constat/ConstatWidgets";
 import VerdictCard from "../VerdictCard";
 import RulesPanel from "./RulesPanel";
 import { EmptyState, InfoRow, SectionTitle, StatusBadge, VerdictPill } from "./ui";
@@ -158,6 +158,7 @@ function ConstatSection({ constat }: { constat: NonNullable<DossierDetail["ai"][
       </div>
       <CoherenceList flags={constat.coherence} />
       {constat.seal && <Seal seal={constat.seal} />}
+      <PdfButton constatId={constat.id} signed={!!constat.seal} />
     </section>
   );
 }

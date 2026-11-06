@@ -24,3 +24,10 @@ htmlcov/
 data/uploads/
 data/local.db.bak
 .claude/settings.local.json
+
+# Documents personnels (non publiés)
+*.pdf
+*.rtf
+docs/
+scripts/build_interview_html.py
+.claude/

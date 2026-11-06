@@ -5,7 +5,7 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.agents.graph import build_graph
-from app.auth import get_current_user
+from app.auth import Principal, require_staff
 from app.config import get_settings
 from app.data.repository import NoDatasetError, get_repository
 from app.db.engine import get_db
@@ -85,6 +85,8 @@ def health() -> dict:
         "model_trained": model_trained,
         "dataset_present": dataset_present,
         "supabase_auth_configured": bool(settings.supabase_jwt_secret),
+        "email_configured": settings.email_configured,
+        "sms_configured": settings.sms_configured,
     }
 
 
@@ -92,7 +94,7 @@ def health() -> dict:
 def analyze_claim(
     request: AnalyzeClaimRequest,
     db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: Principal = Depends(require_staff),
 ) -> AnalyzeClaimResponse:
     graph = _get_graph()
     try:
@@ -109,7 +111,7 @@ def analyze_claim(
 def get_report(
     claim_id: str,
     db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: Principal = Depends(require_staff),
 ) -> AnalyzeClaimResponse:
     verdict = get_verdict(db, claim_id)
     if verdict is None:
@@ -122,7 +124,7 @@ def list_claims(
     db: Session = Depends(get_db),
     limit: int = 50,
     offset: int = 0,
-    user: dict = Depends(get_current_user),
+    _: Principal = Depends(require_staff),
 ) -> ClaimsListResponse:
     claims, total = list_verdicts(db, limit=limit, offset=offset)
     return ClaimsListResponse(claims=claims, total=total)
@@ -131,7 +133,7 @@ def list_claims(
 @router.get("/stats", response_model=StatsResponse)
 def get_stats(
     db: Session = Depends(get_db),
-    user: dict = Depends(get_current_user),
+    _: Principal = Depends(require_staff),
 ) -> StatsResponse:
     stats = _compute_stats(all_verdicts(db))
     return StatsResponse(stats=stats)

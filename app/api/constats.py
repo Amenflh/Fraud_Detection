@@ -1,13 +1,13 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.agents import circumstance_agent
-from app.auth import get_current_user
-from app.constat import service
+from app.auth import Principal, get_principal, require_roles
+from app.constat import pdf, service
 from app.constat.schemas import (
     ConstatCreate,
     ConstatFileOut,
@@ -21,16 +21,21 @@ from app.constat.schemas import (
 from app.db.engine import get_db
 from app.db.models import Constat, ConstatFile
 
-router = APIRouter(dependencies=[Depends(get_current_user)])
+# Driver A (the declaring insured) and back-office staff use the authenticated app.
+router = APIRouter(dependencies=[Depends(require_roles("gestionnaire", "agent", "assure"))])
 # Driver B has no account: the unguessable token in the shared link/QR is the credential.
 public_router = APIRouter(prefix="/public")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
 
-def _get(db: Session, constat_id: str) -> Constat:
+def _can_access(p: Principal, c: Constat) -> bool:
+    return p.is_staff or (p.role == "assure" and c.owner_email == p.email)
+
+
+def _get(db: Session, p: Principal, constat_id: str) -> Constat:
     c = db.get(Constat, constat_id)
-    if c is None:
+    if c is None or not _can_access(p, c):
         raise HTTPException(status_code=404, detail="Constat introuvable")
     return c
 
@@ -47,27 +52,43 @@ def _error(exc: service.ConstatError) -> HTTPException:
 
 
 @router.get("/contracts/lookup")
-def lookup_contract(policy_id: str, plate: str, db: Session = Depends(get_db)) -> dict:
+def lookup_contract(policy_id: str, plate: str, db: Session = Depends(get_db), p: Principal = Depends(get_principal)) -> dict:
     try:
-        return service.lookup_contract(db, policy_id, plate)
+        info = service.lookup_contract(db, policy_id, plate)
     except service.ConstatError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # An insured may only identify their own vehicle.
+    if p.role == "assure" and (info.get("email") or "").lower() != p.email:
+        raise HTTPException(status_code=404, detail="Contrat introuvable")
+    return info
 
 
 @router.post("/constats", response_model=ConstatOut, status_code=201)
-def create_constat(body: ConstatCreate, db: Session = Depends(get_db)) -> ConstatOut:
-    return service.to_out(db, service.create(db, body))
+def create_constat(body: ConstatCreate, db: Session = Depends(get_db), p: Principal = Depends(get_principal)) -> ConstatOut:
+    owner = p.email if p.role == "assure" else None
+    return service.to_out(db, service.create(db, body, owner_email=owner))
 
 
 @router.get("/constats", response_model=list[ConstatOut])
-def list_constats(db: Session = Depends(get_db)) -> list[ConstatOut]:
+def list_constats(db: Session = Depends(get_db), p: Principal = Depends(get_principal)) -> list[ConstatOut]:
     rows = db.execute(select(Constat).order_by(Constat.created_at.desc())).scalars()
-    return [service.to_out(db, c) for c in rows]
+    return [service.to_out(db, c) for c in rows if _can_access(p, c)]
 
 
 @router.get("/constats/{constat_id}", response_model=ConstatOut)
-def get_constat(constat_id: str, db: Session = Depends(get_db)) -> ConstatOut:
-    return service.to_out(db, _get(db, constat_id))
+def get_constat(constat_id: str, db: Session = Depends(get_db), p: Principal = Depends(get_principal)) -> ConstatOut:
+    return service.to_out(db, _get(db, p, constat_id))
+
+
+@router.get("/constats/{constat_id}/pdf")
+def constat_pdf(constat_id: str, db: Session = Depends(get_db), p: Principal = Depends(get_principal)) -> Response:
+    c = _get(db, p, constat_id)
+    content = pdf.render(c, service.files_of(db, c))
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="constat-{c.id}.pdf"'},
+    )
 
 
 @router.post("/constats/{constat_id}/files", response_model=ConstatFileOut, status_code=201)
@@ -76,8 +97,9 @@ async def upload_constat_file(
     file: UploadFile = File(...),
     kind: str = Form(...),
     db: Session = Depends(get_db),
+    p: Principal = Depends(get_principal),
 ):
-    c = _get(db, constat_id)
+    c = _get(db, p, constat_id)
     content = await file.read()
     if len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="Fichier trop volumineux (10 Mo max)")
@@ -88,8 +110,8 @@ async def upload_constat_file(
 
 
 @router.post("/constats/{constat_id}/sign", response_model=ConstatOut)
-def sign(constat_id: str, body: Signature, db: Session = Depends(get_db)) -> ConstatOut:
-    c = _get(db, constat_id)
+def sign(constat_id: str, body: Signature, db: Session = Depends(get_db), p: Principal = Depends(get_principal)) -> ConstatOut:
+    c = _get(db, p, constat_id)
     try:
         service.sign_a(db, c, body)
     except service.ConstatError as exc:
@@ -98,8 +120,8 @@ def sign(constat_id: str, body: Signature, db: Session = Depends(get_db)) -> Con
 
 
 @router.post("/constats/{constat_id}/convert")
-def convert(constat_id: str, body: ConvertRequest, db: Session = Depends(get_db)) -> dict:
-    c = _get(db, constat_id)
+def convert(constat_id: str, body: ConvertRequest, db: Session = Depends(get_db), p: Principal = Depends(get_principal)) -> dict:
+    c = _get(db, p, constat_id)
     try:
         d = service.convert(db, c, body)
     except service.ConstatError as exc:
@@ -108,10 +130,11 @@ def convert(constat_id: str, body: ConvertRequest, db: Session = Depends(get_db)
 
 
 @router.get("/constat-files/{file_id}/file")
-def download_constat_file(file_id: int, db: Session = Depends(get_db)) -> FileResponse:
+def download_constat_file(file_id: int, db: Session = Depends(get_db), p: Principal = Depends(get_principal)) -> FileResponse:
     f = db.get(ConstatFile, file_id)
     if f is None or not Path(f.path).exists():
         raise HTTPException(status_code=404, detail="Fichier introuvable")
+    _get(db, p, f.constat_id)
     return FileResponse(f.path, media_type=f.content_type)
 
 
@@ -134,3 +157,12 @@ def submit_party_b(token: str, body: PartyBSubmit, db: Session = Depends(get_db)
     except service.ConstatError as exc:
         raise _error(exc) from exc
     return service.to_public(c)
+
+
+@public_router.get("/verify/{constat_id}")
+def verify_constat(constat_id: str, seal: str | None = None, db: Session = Depends(get_db)) -> dict:
+    """Authenticity check behind the PDF's QR code. Reveals no personal data."""
+    c = db.get(Constat, constat_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="Constat introuvable")
+    return service.verify(db, c, seal)

@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.agents.dossier_graph import fraud_graph
-from app.auth import get_current_user
+from app.auth import require_manager, require_roles, require_staff
 from app.config import get_settings
 from app.db.engine import get_db
 from app.db.models import Document, Dossier, SubscriptionPhoto
@@ -17,7 +17,7 @@ from app.fraud_rules import consortium, engine
 from app.fraud_rules.rules import RULES_BY_ID
 from app.schemas import ClaimInput
 
-router = APIRouter(dependencies=[Depends(get_current_user)])
+router = APIRouter(dependencies=[Depends(require_staff)])
 saas_router = APIRouter(prefix="/api/v1", tags=["SaaS"])
 
 
@@ -36,7 +36,7 @@ def list_rules(db: Session = Depends(get_db)) -> dict:
     return {"rules": rules, "total": len(rules), "enabled": sum(r["enabled"] for r in rules)}
 
 
-@router.patch("/rules/{rule_id}")
+@router.patch("/rules/{rule_id}", dependencies=[Depends(require_manager)])
 def update_rule(rule_id: str, body: RuleUpdate, db: Session = Depends(get_db)) -> dict:
     if rule_id not in RULES_BY_ID:
         raise HTTPException(status_code=404, detail="Règle inconnue")
@@ -56,7 +56,7 @@ def consortium_stats(db: Session = Depends(get_db)) -> dict:
     return consortium.stats(db)
 
 
-@router.get("/documents/{document_id}/heatmap")
+@router.get("/documents/{document_id}/heatmap", dependencies=[Depends(require_roles("gestionnaire", "agent", "expert"))])
 def document_heatmap(document_id: int, db: Session = Depends(get_db)) -> FileResponse:
     doc = db.get(Document, document_id)
     path = (doc.analysis.get("comparison") or {}).get("heatmap_path") if doc else None
@@ -65,7 +65,7 @@ def document_heatmap(document_id: int, db: Session = Depends(get_db)) -> FileRes
     return FileResponse(path, media_type="image/jpeg")
 
 
-@router.get("/subscription-photos/{photo_id}/file")
+@router.get("/subscription-photos/{photo_id}/file", dependencies=[Depends(require_roles("gestionnaire", "agent", "expert"))])
 def subscription_photo_file(photo_id: int, db: Session = Depends(get_db)) -> FileResponse:
     photo = db.get(SubscriptionPhoto, photo_id)
     if photo is None or not Path(photo.path).exists():

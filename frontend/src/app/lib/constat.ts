@@ -199,3 +199,36 @@ export function currentPosition(): Promise<{ lat: number; lng: number } | null> 
     );
   });
 }
+
+/** Downloads the constat as a PDF (a watermarked draft until both drivers have signed). */
+export async function downloadConstatPdf(id: string): Promise<void> {
+  const res = await authedFetch(`/constats/${id}/pdf`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(typeof body.detail === "string" ? body.detail : `Erreur ${res.status}`);
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `constat-${id}.pdf`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+export interface Verification {
+  id: string;
+  sealed: boolean;
+  valid: boolean;
+  reason?: string;
+  content_unaltered?: boolean;
+  signatures_unaltered?: boolean;
+  seal_matches_document?: boolean;
+  accident_at?: string;
+  signed_at_a?: string;
+  signed_at_b?: string;
+}
+
+export const verifyConstat = (id: string, seal: string | null) =>
+  fetch(`${API_BASE_URL}/public/verify/${encodeURIComponent(id)}${seal ? `?seal=${encodeURIComponent(seal)}` : ""}`, { cache: "no-store" }).then((r) =>
+    json<Verification>(r)
+  );

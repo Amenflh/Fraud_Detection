@@ -5,7 +5,7 @@ import { isSupabaseConfigured } from "./lib/supabase/config";
 const PUBLIC_PATHS = ["/login"];
 // Pages reachable by anyone holding the link (the other driver of a digital constat),
 // whether or not they are signed in.
-const OPEN_PREFIXES = ["/constat/b/"];
+const OPEN_PREFIXES = ["/constat/b/", "/constat/verifier/"];
 
 export async function middleware(request: NextRequest) {
   if (!isSupabaseConfigured()) {

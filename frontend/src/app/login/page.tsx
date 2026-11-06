@@ -85,7 +85,7 @@ export default function LoginPage() {
           <p className="text-sm text-muted-foreground">Espace réservé aux gestionnaires sinistres.</p>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
               <Input id="email" type="email" autoComplete="email" placeholder="vous@exemple.fr" {...register("email")} />

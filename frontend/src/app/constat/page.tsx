@@ -24,7 +24,8 @@ import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import CasesChecklist from "../components/constat/CasesChecklist";
-import { CoherenceList, LocationMap, QrShare, ResponsibilityBar, Seal } from "../components/constat/ConstatWidgets";
+import { CoherenceList, LocationMap, PdfButton, QrShare, ResponsibilityBar, Seal } from "../components/constat/ConstatWidgets";
+import { useMe } from "../components/AuthProvider";
 import DamageZones from "../components/constat/DamageZones";
 import SignaturePad from "../components/constat/SignaturePad";
 import VoiceRecorder from "../components/constat/VoiceRecorder";
@@ -62,8 +63,8 @@ const CITIES: Record<string, [number, number]> = {
 };
 const STEPS = ["Véhicule", "Lieu", "Récit", "Photos", "Envoi"];
 const DEMO_CONTRACTS = [
-  { label: "Sana Mejri", policy: "POL-584120", plate: "212 TU 4471" },
-  { label: "Mehdi Ben Youssef", policy: "POL-700100", plate: "180 TU 2025" },
+  { label: "Sana Mejri", policy: "POL-584120", plate: "212 TU 4471", own: true },
+  { label: "Mehdi Ben Youssef", policy: "POL-700100", plate: "180 TU 2025", own: false },
 ];
 const CONSTATS_UPDATED = "constats:updated";
 
@@ -76,6 +77,9 @@ const localNow = () => {
 };
 
 function Wizard({ onCreated }: { onCreated: (id: string) => void }) {
+  const { me } = useMe();
+  // An insured may only identify their own vehicle: offer only the demo contract linked to their account.
+  const demoContracts = DEMO_CONTRACTS.filter((d) => me?.role !== "assure" || d.own);
   const [step, setStep] = useState(0);
   const [policy, setPolicy] = useState("");
   const [plate, setPlate] = useState("");
@@ -213,7 +217,7 @@ function Wizard({ onCreated }: { onCreated: (id: string) => void }) {
             <h2 className="text-lg font-semibold">Identifiez votre véhicule</h2>
             <p className="text-xs text-muted-foreground">Numéro de contrat + immatriculation : vos informations sont pré-remplies.</p>
             <div className="flex flex-wrap gap-2">
-              {DEMO_CONTRACTS.map((d) => (
+              {demoContracts.map((d) => (
                 <button
                   key={d.policy}
                   onClick={() => {
@@ -531,6 +535,7 @@ function ConstatTracker({ id }: { id: string }) {
           </div>
         )}
         {c.seal && <Seal seal={c.seal} />}
+        <PdfButton constatId={c.id} signed={c.status === "signe" || c.status === "converti"} />
 
         {c.status === "signe" && (
           <div className="space-y-2 rounded-xl border border-white/10 bg-white/[0.03] p-3">

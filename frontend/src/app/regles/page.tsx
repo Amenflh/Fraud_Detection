@@ -25,6 +25,7 @@ import { EmptyState } from "../components/dossier/ui";
 import { API_BASE_URL } from "../lib/api";
 import { DOSSIERS_UPDATED_EVENT } from "../lib/dossiers";
 import { usePolling } from "../lib/hooks";
+import { useMe } from "../components/AuthProvider";
 import {
   backtestRules,
   DEMO_API_KEY,
@@ -65,6 +66,8 @@ type Draft = Record<string, { enabled?: boolean; weight?: number }>;
 export default function RulesPage() {
   const { data, refresh, isLoading } = usePolling(listRules, { intervalMs: 60000, refreshOn: DOSSIERS_UPDATED_EVENT });
   const { data: fed } = usePolling(getConsortium, { intervalMs: 60000 });
+  const { me } = useMe();
+  const canEdit = !me || me.role === "gestionnaire";
   const [category, setCategory] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({});
   const [backtest, setBacktest] = useState<Backtest | null>(null);
@@ -82,6 +85,7 @@ export default function RulesPage() {
   const effective = (r: RuleRow) => ({ enabled: draft[r.id]?.enabled ?? r.enabled, weight: draft[r.id]?.weight ?? r.weight });
 
   function edit(r: RuleRow, patch: { enabled?: boolean; weight?: number }) {
+    if (!canEdit) return;
     setBacktest(null);
     setDraft((d) => {
       const next = { ...d[r.id], ...patch };
@@ -214,6 +218,7 @@ export default function RulesPage() {
                       )}
                     >
                       <button
+                        disabled={!canEdit}
                         onClick={() => edit(r, { enabled: !eff.enabled })}
                         className={cn("relative h-5 w-9 rounded-full transition", eff.enabled ? "bg-emerald-400/80" : "bg-white/15")}
                         aria-label={eff.enabled ? "Désactiver" : "Activer"}
@@ -249,6 +254,7 @@ export default function RulesPage() {
                           max={50}
                           value={eff.weight}
                           onChange={(e) => edit(r, { weight: Number(e.target.value) })}
+                          disabled={!canEdit}
                           className="w-full accent-cyan-300"
                           aria-label={`Poids de ${r.id}`}
                         />

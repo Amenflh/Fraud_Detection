@@ -1,12 +1,12 @@
 "use client";
 
-import { Check, Copy, ExternalLink, Fingerprint, MapPin, Scale, ShieldAlert } from "lucide-react";
+import { Check, Copy, ExternalLink, FileDown, Fingerprint, Loader2, MapPin, Scale, ShieldAlert } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
-import type { CoherenceFlag, Responsibility } from "../../lib/constat";
+import { downloadConstatPdf, type CoherenceFlag, type Responsibility } from "../../lib/constat";
 
 export function LocationMap({ lat, lng, className }: { lat: number; lng: number; className?: string }) {
   const d = 0.006;
@@ -123,5 +123,32 @@ export function Seal({ seal }: { seal: string }) {
         {seal}
       </code>
     </div>
+  );
+}
+
+export function PdfButton({ constatId, signed }: { constatId: string; signed: boolean }) {
+  const [busy, setBusy] = useState(false);
+  async function download() {
+    setBusy(true);
+    try {
+      await downloadConstatPdf(constatId);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Téléchargement impossible");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button
+      onClick={download}
+      disabled={busy}
+      className={cn(
+        "inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-semibold transition disabled:opacity-60",
+        signed ? "bg-gradient-to-r from-emerald-400 to-cyan-400 text-slate-950" : "border border-white/15 bg-white/5 text-muted-foreground hover:text-foreground"
+      )}
+    >
+      {busy ? <Loader2 className="size-3.5 animate-spin" /> : <FileDown className="size-3.5" />}
+      {signed ? "Télécharger le PDF officiel" : "Télécharger le brouillon (PDF)"}
+    </button>
   );
 }

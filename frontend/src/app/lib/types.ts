@@ -53,6 +53,8 @@ export interface HealthStatus {
   model_trained: boolean;
   dataset_present: boolean;
   supabase_auth_configured: boolean;
+  email_configured?: boolean;
+  sms_configured?: boolean;
 }
 
 export interface ClaimsList {

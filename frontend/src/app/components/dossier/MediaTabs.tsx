@@ -20,6 +20,7 @@ const FACES = [
 ];
 
 function ForensicBadge({ doc }: { doc: DossierDocument }) {
+  if (!doc.analysis.verdict) return null; // hidden from roles that must not see the fraud analysis
   const suspect = doc.analysis.verdict === "suspect";
   return (
     <span
@@ -223,10 +224,19 @@ export function PhotosTab({ dossier, role, onChange }: { dossier: DossierDetail;
   );
 }
 
-const UPLOAD_KINDS = ["constat", "devis", "rapport_expertise", "facture", "autre"];
+// Mirrors the API's per-role upload rules (app/access.py).
+const UPLOAD_KINDS: Record<string, string[]> = {
+  gestionnaire: ["constat", "devis", "rapport_expertise", "facture", "autre"],
+  agent: ["constat", "autre"],
+  assure: ["constat", "autre"],
+  garage: ["devis", "facture", "autre"],
+  expert: ["rapport_expertise", "autre"],
+};
 
 export function DocumentsTab({ dossier, role, onChange }: { dossier: DossierDetail; role: Role; onChange: () => void }) {
-  const [kind, setKind] = useState("constat");
+  const kinds = UPLOAD_KINDS[role] ?? UPLOAD_KINDS.gestionnaire;
+  const [chosen, setKind] = useState(kinds[0]);
+  const kind = kinds.includes(chosen) ? chosen : kinds[0];
   const [amount, setAmount] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -296,7 +306,7 @@ export function DocumentsTab({ dossier, role, onChange }: { dossier: DossierDeta
             onChange={(e) => setKind(e.target.value)}
             className="h-9 rounded-lg border border-input bg-transparent px-2 text-sm dark:bg-input/30"
           >
-            {UPLOAD_KINDS.map((k) => (
+            {kinds.map((k) => (
               <option key={k} value={k} className="bg-slate-900">
                 {DOCUMENT_KINDS[k]}
               </option>
